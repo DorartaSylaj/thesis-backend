@@ -8,113 +8,178 @@ use Illuminate\Support\Facades\Auth;
 
 class AppointmentController extends Controller
 {
-    // List all appointments (for nurse and doctor)
+    /**
+     * List appointments for authenticated user.
+     * Nurses see all their appointments (pending + done).
+     * Doctors see all appointments assigned to them, sorted by closest date.
+     */
     public function index()
     {
         $user = Auth::user();
 
         if ($user->role === 'nurse') {
-            // Show only appointments created by this nurse
-            return Appointment::where('nurse_id', $user->id)->get();
+            $appointments = Appointment::where('nurse_id', $user->id)
+                ->with('patient', 'doctor')
+                ->orderBy('appointment_date', 'asc')
+                ->get();
+        } elseif ($user->role === 'doctor') {
+            $appointments = Appointment::where('doctor_id', $user->id)
+                ->with('patient', 'nurse')
+                ->orderBy('appointment_date', 'asc')
+                ->get();
+        } else {
+            return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if ($user->role === 'doctor') {
-            // Show all appointments for doctor in next 5 days
-            return Appointment::whereBetween('appointment_date', [
-                now(),
-                now()->addDays(5)
-            ])->get();
-        }
-
-        return response()->json(['message' => 'Unauthorized'], 403);
+        return response()->json(['data' => $appointments]);
     }
 
-    // Show single appointment
+    /**
+     * List done appointments for authenticated user (optional endpoint for reports)
+     */
+    public function doneAppointments()
+    {
+        try {
+            $user = Auth::user();
+
+            if ($user->role === 'nurse') {
+                $appointments = Appointment::where('nurse_id', $user->id)
+                    ->where('status', 'done')
+                    ->with('patient', 'doctor')
+                    ->orderBy('appointment_date', 'asc')
+                    ->get();
+            } elseif ($user->role === 'doctor') {
+                $appointments = Appointment::where('doctor_id', $user->id)
+                    ->where('status', 'done')
+                    ->with('patient', 'nurse')
+                    ->orderBy('appointment_date', 'asc')
+                    ->get();
+            } else {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+
+            return response()->json(['data' => $appointments]);
+        } catch (\Throwable $e) {
+            \Log::error('Failed to fetch done appointments: ' . $e->getMessage());
+            return response()->json(['message' => 'Server error'], 500);
+        }
+    }
+
+    /**
+     * Show a single appointment
+     */
     public function show($id)
     {
-        $appointment = Appointment::findOrFail($id);
-        return $appointment;
+        try {
+            $appointment = Appointment::with('patient', 'doctor', 'nurse')->findOrFail($id);
+            return response()->json($appointment);
+        } catch (\Throwable $e) {
+            \Log::error('Failed to fetch appointment: ' . $e->getMessage());
+            return response()->json(['message' => 'Server error'], 500);
+        }
     }
 
-    // Nurse creates appointment
+    /**
+     * Nurse creates a new appointment
+     */
     public function store(Request $request)
     {
         $request->validate([
             'patient_name' => 'required|string',
-            'patient_email' => 'nullable|email',
             'appointment_date' => 'required|date',
-            'type' => 'required|string'
+            'type' => 'required|string',
+            'doctor_id' => 'nullable|exists:users,id',
+            'patient_email' => 'nullable|email',
         ]);
 
-        $appointment = Appointment::create([
-            'nurse_id' => Auth::id(), // nurse creating appointment
-            'doctor_id' => $request->doctor_id ?? null,
-            'patient_name' => $request->patient_name,
-            'patient_email' => $request->patient_email,
-            'appointment_date' => $request->appointment_date,
-            'type' => $request->type,
-            'status' => 'pending',
-        ]);
+        try {
+            $user = Auth::user();
+            if ($user->role !== 'nurse') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
 
-        return response()->json([
-            'message' => 'Appointment created successfully',
-            'appointment' => $appointment
-        ]);
+            $appointment = Appointment::create([
+                'nurse_id' => $user->id,
+                'doctor_id' => $request->doctor_id ?? 3,
+                'patient_name' => $request->patient_name,
+                'patient_email' => $request->patient_email ?? null,
+                'appointment_date' => $request->appointment_date,
+                'type' => $request->type,
+                'status' => 'pending',
+                'created_by' => $user->id,
+                'updated_by' => null,
+            ]);
+
+            return response()->json([
+                'message' => 'Appointment created successfully',
+                'appointment' => $appointment
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('Failed to create appointment: ' . $e->getMessage());
+            return response()->json(['message' => 'Server error'], 500);
+        }
     }
 
-    // Doctor updates appointment status and report
+    /**
+     * Update appointment status or notes
+     */
     public function update(Request $request, $id)
     {
-        $request->validate([
-            'status' => 'required|in:pending,done',
-            'report' => 'nullable|string'
-        ]);
-
         $appointment = Appointment::findOrFail($id);
+        $user = $request->user();
 
-        if (Auth::user()->role !== 'doctor') {
+        if (!in_array($user->role, ['doctor', 'nurse'])) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $appointment->update([
-            'status' => $request->status,
-            'report' => $request->report ?? $appointment->report,
-            'updated_by' => Auth::id(), // doctor updating
+        if ($user->role === 'doctor' && $appointment->doctor_id !== $user->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if ($user->role === 'nurse' && $appointment->nurse_id !== $user->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'status' => 'sometimes|string|in:pending,done,cancelled',
+            'notes' => 'sometimes|string',
         ]);
 
+        if ($request->has('status')) {
+            $appointment->status = $request->status;
+        }
+
+        if ($request->has('notes')) {
+            $appointment->notes = $request->notes;
+        }
+
+        $appointment->save();
+
         return response()->json([
-            'message' => 'Appointment updated successfully',
+            'message' => 'Appointment updated',
             'appointment' => $appointment
         ]);
     }
 
-    // List all done appointments for nurse
-    public function doneAppointments()
-    {
-        $user = Auth::user();
-
-        if ($user->role !== 'nurse') {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
-
-        return Appointment::where('nurse_id', $user->id)
-            ->where('status', 'done')
-            ->get();
-    }
-
-    // Clear done appointments for nurse (end of shift)
+    /**
+     * Clear done appointments (nurse only)
+     */
     public function clearDoneAppointments()
     {
-        $user = Auth::user();
+        try {
+            $user = Auth::user();
+            if ($user->role !== 'nurse') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
 
-        if ($user->role !== 'nurse') {
-            return response()->json(['message' => 'Unauthorized'], 403);
+            Appointment::where('nurse_id', $user->id)
+                ->where('status', 'done')
+                ->delete();
+
+            return response()->json(['message' => 'Done appointments cleared']);
+        } catch (\Throwable $e) {
+            \Log::error('Failed to clear done appointments: ' . $e->getMessage());
+            return response()->json(['message' => 'Server error'], 500);
         }
-
-        Appointment::where('nurse_id', $user->id)
-            ->where('status', 'done')
-            ->delete();
-
-        return response()->json(['message' => 'Done appointments cleared']);
     }
 }

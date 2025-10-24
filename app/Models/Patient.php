@@ -14,6 +14,11 @@ class Patient extends Model
         'last_name',
         'birth_date',
         'symptoms',
-        'recovery_days',
+        'recovery_days'
     ];
+
+    public function appointments()
+    {
+        return $this->hasMany(Appointment::class);
+    }
 }
