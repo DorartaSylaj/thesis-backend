@@ -18,15 +18,27 @@ class AppointmentController extends Controller
         $user = Auth::user();
 
         if ($user->role === 'nurse') {
-            $appointments = Appointment::where('nurse_id', $user->id)
-                ->with('patient', 'doctor')
+            $appointments = Appointment::with('patient', 'doctor')
+                ->where('nurse_id', $user->id)
                 ->orderBy('appointment_date', 'asc')
-                ->get();
+                ->get()
+                ->map(function ($appt) {
+                    $appt->patient_name = $appt->patient
+                        ? $appt->patient->first_name . ' ' . $appt->patient->last_name
+                        : ($appt->patient_name ?? 'Pa emër');
+                    return $appt;
+                });
         } elseif ($user->role === 'doctor') {
             $appointments = Appointment::where('doctor_id', $user->id)
                 ->with('patient', 'nurse')
                 ->orderBy('appointment_date', 'asc')
-                ->get();
+                ->get()
+                ->map(function ($appt) {
+                    $appt->patient_name = $appt->patient
+                        ? $appt->patient->first_name . ' ' . $appt->patient->last_name
+                        : ($appt->patient_name ?? 'Pa emër');
+                    return $appt;
+                });
         } else {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
@@ -35,7 +47,7 @@ class AppointmentController extends Controller
     }
 
     /**
-     * List done appointments for authenticated user (optional endpoint for reports)
+     * List done appointments for authenticated user
      */
     public function doneAppointments()
     {
@@ -47,13 +59,25 @@ class AppointmentController extends Controller
                     ->where('status', 'done')
                     ->with('patient', 'doctor')
                     ->orderBy('appointment_date', 'asc')
-                    ->get();
+                    ->get()
+                    ->map(function ($appt) {
+                        $appt->patient_name = $appt->patient
+                            ? $appt->patient->first_name . ' ' . $appt->patient->last_name
+                            : ($appt->patient_name ?? 'Pa emër');
+                        return $appt;
+                    });
             } elseif ($user->role === 'doctor') {
                 $appointments = Appointment::where('doctor_id', $user->id)
                     ->where('status', 'done')
                     ->with('patient', 'nurse')
                     ->orderBy('appointment_date', 'asc')
-                    ->get();
+                    ->get()
+                    ->map(function ($appt) {
+                        $appt->patient_name = $appt->patient
+                            ? $appt->patient->first_name . ' ' . $appt->patient->last_name
+                            : ($appt->patient_name ?? 'Pa emër');
+                        return $appt;
+                    });
             } else {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
@@ -72,6 +96,11 @@ class AppointmentController extends Controller
     {
         try {
             $appointment = Appointment::with('patient', 'doctor', 'nurse')->findOrFail($id);
+            if ($appointment->patient) {
+                $appointment->patient_name = $appointment->patient->first_name . ' ' . $appointment->patient->last_name;
+            } else {
+                $appointment->patient_name = $appointment->patient_name ?? 'Pa emër';
+            }
             return response()->json($appointment);
         } catch (\Throwable $e) {
             \Log::error('Failed to fetch appointment: ' . $e->getMessage());
@@ -109,6 +138,11 @@ class AppointmentController extends Controller
                 'created_by' => $user->id,
                 'updated_by' => null,
             ]);
+
+            // Ensure patient_name is consistent
+            if ($appointment->patient) {
+                $appointment->patient_name = $appointment->patient->first_name . ' ' . $appointment->patient->last_name;
+            }
 
             return response()->json([
                 'message' => 'Appointment created successfully',
@@ -154,6 +188,11 @@ class AppointmentController extends Controller
         }
 
         $appointment->save();
+
+        // Ensure patient_name is consistent
+        if ($appointment->patient) {
+            $appointment->patient_name = $appointment->patient->first_name . ' ' . $appointment->patient->last_name;
+        }
 
         return response()->json([
             'message' => 'Appointment updated',

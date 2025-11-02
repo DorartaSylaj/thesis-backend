@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Auth;
 
 class DoctorDashboardController extends Controller
 {
-    // List all upcoming appointments
+    // List all upcoming appointments for this doctor
     public function upcomingAppointments()
     {
         $user = Auth::user();
@@ -17,16 +17,23 @@ class DoctorDashboardController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        // Show all appointments created by the nurse (ignore doctor_id)
-        $appointments = Appointment::where('status', '!=', 'done')
+        $appointments = Appointment::where('doctor_id', $user->id)
+            ->where('status', '!=', 'done')
             ->with('patient', 'nurse')
             ->orderBy('appointment_date', 'asc')
-            ->get();
+            ->get()
+            ->map(function ($appt) {
+                // Map patient_name from patient relation
+                $appt->patient_name = $appt->patient
+                    ? $appt->patient->first_name . ' ' . $appt->patient->last_name
+                    : ($appt->patient_name ?? 'Pa emër');
+                return $appt;
+            });
 
-        return response()->json($appointments);
+        return response()->json(['data' => $appointments]);
     }
 
-    // List all done appointments
+    // List all done appointments for this doctor
     public function doneAppointments()
     {
         $user = Auth::user();
@@ -35,11 +42,19 @@ class DoctorDashboardController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $appointments = Appointment::where('status', 'done')
+        $appointments = Appointment::where('doctor_id', $user->id)
+            ->where('status', 'done')
             ->with('patient', 'nurse')
             ->orderBy('appointment_date', 'asc')
-            ->get();
+            ->get()
+            ->map(function ($appt) {
+                // Map patient_name from patient relation
+                $appt->patient_name = $appt->patient
+                    ? $appt->patient->first_name . ' ' . $appt->patient->last_name
+                    : ($appt->patient_name ?? 'Pa emër');
+                return $appt;
+            });
 
-        return response()->json($appointments);
+        return response()->json(['data' => $appointments]);
     }
 }

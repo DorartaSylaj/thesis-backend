@@ -28,7 +28,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
 // ----------------------
 // Nurse routes
 // ----------------------
-Route::middleware(['auth:sanctum', 'role:nurse'])->group(function () {
+Route::middleware(['auth:sanctum', 'role:nurse'])->prefix('nurse')->group(function () {
+
+    // Nurse Management (if needed)
     Route::get('/nurses', [NurseController::class, 'index']);
     Route::post('/nurses', [NurseController::class, 'store']);
     Route::put('/nurses/{id}', [NurseController::class, 'update']);
@@ -48,6 +50,8 @@ Route::middleware(['auth:sanctum', 'role:nurse'])->group(function () {
     Route::put('/patients/{id}', [PatientController::class, 'update']);
     Route::delete('/patients/{id}', [PatientController::class, 'destroy']);
 });
+
+
 
 // ----------------------
 // Doctor routes
