@@ -1,5 +1,6 @@
 <?php
 
+// use Laravel\Sanctum\Http\Controllers\CsrfCookieController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AdminController;
@@ -8,7 +9,13 @@ use App\Http\Controllers\DoctorController;
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\PatientController;
 use App\Http\Controllers\DoctorDashboardController;
+use App\Http\Controllers\ReportController;
 
+
+// ----------------------
+// CSRF for Sanctum
+// ----------------------
+Route::get('/sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 // ----------------------
 // Authentication
 // ----------------------
@@ -42,6 +49,9 @@ Route::middleware(['auth:sanctum', 'role:nurse'])->prefix('nurse')->group(functi
     Route::post('/appointments', [AppointmentController::class, 'store']);
     Route::put('/appointments/{id}', [AppointmentController::class, 'update']);
     Route::delete('/appointments/done/clear', [AppointmentController::class, 'clearDoneAppointments']);
+    Route::delete('/appointments/clear-non-pending', [AppointmentController::class, 'clearNonPendingAppointments'])
+        ->middleware(['auth:sanctum', 'role:nurse']);
+
 
     // Patients (Nurse)
     Route::get('/patients', [PatientController::class, 'index']);

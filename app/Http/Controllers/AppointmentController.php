@@ -4,14 +4,13 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Appointment;
+use App\Models\Patient;
 use Illuminate\Support\Facades\Auth;
 
 class AppointmentController extends Controller
 {
     /**
      * List appointments for authenticated user.
-     * Nurses see all their appointments (pending + done).
-     * Doctors see all appointments assigned to them, sorted by closest date.
      */
     public function index()
     {
@@ -47,60 +46,16 @@ class AppointmentController extends Controller
     }
 
     /**
-     * List done appointments for authenticated user
-     */
-    public function doneAppointments()
-    {
-        try {
-            $user = Auth::user();
-
-            if ($user->role === 'nurse') {
-                $appointments = Appointment::where('nurse_id', $user->id)
-                    ->where('status', 'done')
-                    ->with('patient', 'doctor')
-                    ->orderBy('appointment_date', 'asc')
-                    ->get()
-                    ->map(function ($appt) {
-                        $appt->patient_name = $appt->patient
-                            ? $appt->patient->first_name . ' ' . $appt->patient->last_name
-                            : ($appt->patient_name ?? 'Pa emër');
-                        return $appt;
-                    });
-            } elseif ($user->role === 'doctor') {
-                $appointments = Appointment::where('doctor_id', $user->id)
-                    ->where('status', 'done')
-                    ->with('patient', 'nurse')
-                    ->orderBy('appointment_date', 'asc')
-                    ->get()
-                    ->map(function ($appt) {
-                        $appt->patient_name = $appt->patient
-                            ? $appt->patient->first_name . ' ' . $appt->patient->last_name
-                            : ($appt->patient_name ?? 'Pa emër');
-                        return $appt;
-                    });
-            } else {
-                return response()->json(['message' => 'Unauthorized'], 403);
-            }
-
-            return response()->json(['data' => $appointments]);
-        } catch (\Throwable $e) {
-            \Log::error('Failed to fetch done appointments: ' . $e->getMessage());
-            return response()->json(['message' => 'Server error'], 500);
-        }
-    }
-
-    /**
      * Show a single appointment
      */
     public function show($id)
     {
         try {
             $appointment = Appointment::with('patient', 'doctor', 'nurse')->findOrFail($id);
-            if ($appointment->patient) {
-                $appointment->patient_name = $appointment->patient->first_name . ' ' . $appointment->patient->last_name;
-            } else {
-                $appointment->patient_name = $appointment->patient_name ?? 'Pa emër';
-            }
+            $appointment->patient_name = $appointment->patient
+                ? $appointment->patient->first_name . ' ' . $appointment->patient->last_name
+                : ($appointment->patient_name ?? 'Pa emër');
+
             return response()->json($appointment);
         } catch (\Throwable $e) {
             \Log::error('Failed to fetch appointment: ' . $e->getMessage());
@@ -111,6 +66,9 @@ class AppointmentController extends Controller
     /**
      * Nurse creates a new appointment
      */
+    /**
+     * Nurse creates a new appointment
+     */
     public function store(Request $request)
     {
         $request->validate([
@@ -118,11 +76,11 @@ class AppointmentController extends Controller
             'appointment_date' => 'required|date',
             'type' => 'required|string',
             'doctor_id' => 'nullable|exists:users,id',
-            'patient_email' => 'nullable|email',
         ]);
 
         try {
-            $user = Auth::user();
+            $user = $request->user();
+
             if ($user->role !== 'nurse') {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
@@ -131,7 +89,7 @@ class AppointmentController extends Controller
                 'nurse_id' => $user->id,
                 'doctor_id' => $request->doctor_id ?? 3,
                 'patient_name' => $request->patient_name,
-                'patient_email' => $request->patient_email ?? null,
+                'patient_id' => $request->patient_id ?? null,
                 'appointment_date' => $request->appointment_date,
                 'type' => $request->type,
                 'status' => 'pending',
@@ -139,23 +97,24 @@ class AppointmentController extends Controller
                 'updated_by' => null,
             ]);
 
-            // Ensure patient_name is consistent
-            if ($appointment->patient) {
-                $appointment->patient_name = $appointment->patient->first_name . ' ' . $appointment->patient->last_name;
+            // Load patient relation if exists
+            if ($appointment->patient_id) {
+                $appointment->load('patient');
             }
 
             return response()->json([
-                'message' => 'Appointment created successfully',
+                'message' => 'Termin u krijua me sukses',
                 'appointment' => $appointment
-            ]);
+            ], 201);
         } catch (\Throwable $e) {
             \Log::error('Failed to create appointment: ' . $e->getMessage());
             return response()->json(['message' => 'Server error'], 500);
         }
     }
 
+
     /**
-     * Update appointment status or notes
+     * Update appointment (status, notes, or patient info)
      */
     public function update(Request $request, $id)
     {
@@ -177,33 +136,63 @@ class AppointmentController extends Controller
         $request->validate([
             'status' => 'sometimes|string|in:pending,done,cancelled',
             'notes' => 'sometimes|string',
+            'patient_name' => 'sometimes|string',
+            'patient_email' => 'sometimes|email',
         ]);
 
+        // Update status or notes
         if ($request->has('status')) {
             $appointment->status = $request->status;
         }
-
         if ($request->has('notes')) {
             $appointment->notes = $request->notes;
         }
 
-        $appointment->save();
+        // Update or create patient if patient info changed
+        if ($request->has('patient_name') || $request->has('patient_email')) {
+            $patient = null;
 
-        // Ensure patient_name is consistent
-        if ($appointment->patient) {
-            $appointment->patient_name = $appointment->patient->first_name . ' ' . $appointment->patient->last_name;
+            if ($request->patient_email) {
+                $patient = Patient::where('email', $request->patient_email)->first();
+            }
+
+            if (!$patient && $request->has('patient_name')) {
+                $nameParts = explode(' ', $request->patient_name, 2);
+                $firstName = $nameParts[0] ?? $request->patient_name;
+                $lastName = $nameParts[1] ?? '';
+                $patient = Patient::where('first_name', $firstName)
+                    ->where('last_name', $lastName)
+                    ->first();
+            }
+
+            if (!$patient && $request->has('patient_name')) {
+                $nameParts = explode(' ', $request->patient_name, 2);
+                $patient = Patient::create([
+                    'first_name' => $nameParts[0] ?? $request->patient_name,
+                    'last_name' => $nameParts[1] ?? '',
+                    'email' => $request->patient_email ?? null,
+                ]);
+            }
+
+            if ($patient) {
+                $appointment->patient_id = $patient->id;
+                $appointment->patient_name = $patient->first_name . ' ' . $patient->last_name;
+                $appointment->patient_email = $patient->email;
+            }
         }
 
+        $appointment->save();
+
         return response()->json([
-            'message' => 'Appointment updated',
+            'message' => 'Appointment updated successfully',
             'appointment' => $appointment
         ]);
     }
 
     /**
-     * Clear done appointments (nurse only)
+     * Clear all non-pending appointments (nurse only)
      */
-    public function clearDoneAppointments()
+    public function clearNonPendingAppointments()
     {
         try {
             $user = Auth::user();
@@ -212,12 +201,12 @@ class AppointmentController extends Controller
             }
 
             Appointment::where('nurse_id', $user->id)
-                ->where('status', 'done')
+                ->where('status', '!=', 'pending')
                 ->delete();
 
-            return response()->json(['message' => 'Done appointments cleared']);
+            return response()->json(['message' => 'All non-pending appointments cleared']);
         } catch (\Throwable $e) {
-            \Log::error('Failed to clear done appointments: ' . $e->getMessage());
+            \Log::error('Failed to clear non-pending appointments: ' . $e->getMessage());
             return response()->json(['message' => 'Server error'], 500);
         }
     }

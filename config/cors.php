@@ -2,12 +2,14 @@
 
 return [
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['*'],
 
     'allowed_methods' => ['*'],
 
-    // Allow your frontend domain
-    'allowed_origins' => ['http://localhost:5173'],
+    'allowed_origins' => [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+    ],
 
     'allowed_origins_patterns' => [],
 
@@ -17,5 +19,5 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => true, // important for cookies
+    'supports_credentials' => true,
 ];
