@@ -8,38 +8,35 @@ use Illuminate\Support\Facades\Auth;
 
 class PatientController extends Controller
 {
-    /**
-     * List all patients.
-     * Nurses should see all patients.
-     */
+    // List all patients
     public function index()
     {
-        $user = Auth::user();
-
-        if ($user->role === 'nurse') {
-            $patients = Patient::all(); // Nurses see all patients
-        } else {
-            $patients = Patient::all(); // Doctors also see all patients (unchanged)
-        }
-
-        return response()->json(['data' => $patients]); // wrap in 'data' for consistency
+        $patients = Patient::all(); // Both nurses and doctors see all patients
+        return response()->json(['data' => $patients]);
     }
 
-    /**
-     * Store a new patient.
-     */
+    // Create a new patient
     public function store(Request $request)
     {
         $validated = $request->validate([
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'birth_date' => 'required|date',
-            'symptoms' => 'required|string',
+            'symptoms' => 'nullable|string',
             'recovery_days' => 'nullable|integer',
+            'prescription' => 'nullable|string',
         ]);
 
         try {
-            $patient = Patient::create($validated);
+            $patient = Patient::create([
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'birth_date' => $validated['birth_date'],
+                'symptoms' => $validated['symptoms'] ?? '',
+                'recovery_days' => $validated['recovery_days'] ?? null,
+                'prescription' => $validated['prescription'] ?? '',
+            ]);
+
             return response()->json([
                 'message' => 'Patient created successfully',
                 'patient' => $patient,
@@ -50,23 +47,29 @@ class PatientController extends Controller
         }
     }
 
-    /**
-     * Show a single patient.
-     */
+    // Show a single patient
     public function show($id)
     {
         try {
             $patient = Patient::findOrFail($id);
-            return response()->json($patient);
+            return response()->json([
+                'id' => $patient->id,
+                'first_name' => $patient->first_name,
+                'last_name' => $patient->last_name,
+                'birth_date' => $patient->birth_date,
+                'symptoms' => $patient->symptoms,
+                'recovery_days' => $patient->recovery_days,
+                'prescription' => $patient->prescription,
+                'created_at' => $patient->created_at,
+                'updated_at' => $patient->updated_at,
+            ]);
         } catch (\Throwable $e) {
             \Log::error('Failed to fetch patient: ' . $e->getMessage());
             return response()->json(['message' => 'Server error'], 500);
         }
     }
 
-    /**
-     * Update patient data.
-     */
+    // Update patient
     public function update(Request $request, $id)
     {
         try {
@@ -78,13 +81,14 @@ class PatientController extends Controller
                 'birth_date' => 'sometimes|required|date',
                 'symptoms' => 'sometimes|required|string',
                 'recovery_days' => 'nullable|integer',
+                'prescription' => 'nullable|string',
             ]);
 
             $patient->update($validated);
 
             return response()->json([
                 'message' => 'Patient updated successfully',
-                'patient' => $patient,
+                'data' => $patient,
             ]);
         } catch (\Throwable $e) {
             \Log::error('Failed to update patient: ' . $e->getMessage());
@@ -92,19 +96,28 @@ class PatientController extends Controller
         }
     }
 
-    /**
-     * Delete a patient.
-     */
+    // Delete patient
     public function destroy($id)
     {
         try {
             $patient = Patient::findOrFail($id);
-            $patient->delete();
 
+            if ($patient->appointments()->count() > 0) {
+                return response()->json([
+                    'message' => 'Nuk mund të fshihet pacienti sepse ka termine të lidhura.'
+                ], 400);
+            }
+
+            $patient->delete();
             return response()->json(['message' => 'Patient deleted successfully']);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['message' => 'Pacienti nuk u gjet'], 404);
         } catch (\Throwable $e) {
             \Log::error('Failed to delete patient: ' . $e->getMessage());
-            return response()->json(['message' => 'Server error'], 500);
+            return response()->json([
+                'message' => 'Server error',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 }

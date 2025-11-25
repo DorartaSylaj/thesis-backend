@@ -11,9 +11,10 @@ return new class extends Migration {
             $table->id();
             $table->string('first_name');
             $table->string('last_name');
-            $table->date('birth_date')->nullable();
+            $table->date('birth_date');
             $table->text('symptoms')->nullable();
-            $table->text('recovery_days')->nullable();
+            $table->integer('recovery_days')->nullable();
+            $table->text('prescription')->nullable();
             $table->timestamps();
         });
     }

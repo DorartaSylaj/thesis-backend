@@ -14,7 +14,8 @@ class Patient extends Model
         'last_name',
         'birth_date',
         'symptoms',
-        'recovery_days'
+        'recovery_days',
+        'prescription', // ← ADD THIS
     ];
 
     public function appointments()

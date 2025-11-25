@@ -25,6 +25,14 @@ class AppointmentController extends Controller
                     $appt->patient_name = $appt->patient
                         ? $appt->patient->first_name . ' ' . $appt->patient->last_name
                         : ($appt->patient_name ?? 'Pa emër');
+
+                    $translated = [
+                        'pending' => 'Në pritje',
+                        'done' => 'Përfunduar',
+                        'cancelled' => 'Anuluar'
+                    ];
+                    $appt->status_label = $translated[$appt->status] ?? $appt->status;
+
                     return $appt;
                 });
         } elseif ($user->role === 'doctor') {
@@ -36,6 +44,14 @@ class AppointmentController extends Controller
                     $appt->patient_name = $appt->patient
                         ? $appt->patient->first_name . ' ' . $appt->patient->last_name
                         : ($appt->patient_name ?? 'Pa emër');
+
+                    $translated = [
+                        'pending' => 'Në pritje',
+                        'done' => 'Përfunduar',
+                        'cancelled' => 'Anuluar'
+                    ];
+                    $appt->status_label = $translated[$appt->status] ?? $appt->status;
+
                     return $appt;
                 });
         } else {
@@ -46,7 +62,7 @@ class AppointmentController extends Controller
     }
 
     /**
-     * Show a single appointment
+     * Show a single appointment.
      */
     public function show($id)
     {
@@ -64,10 +80,7 @@ class AppointmentController extends Controller
     }
 
     /**
-     * Nurse creates a new appointment
-     */
-    /**
-     * Nurse creates a new appointment
+     * Nurse creates a new appointment and links patient.
      */
     public function store(Request $request)
     {
@@ -76,6 +89,7 @@ class AppointmentController extends Controller
             'appointment_date' => 'required|date',
             'type' => 'required|string',
             'doctor_id' => 'nullable|exists:users,id',
+            'patient_email' => 'nullable|email',
         ]);
 
         try {
@@ -85,11 +99,31 @@ class AppointmentController extends Controller
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
 
+            // Link or create patient safely
+            $patient = null;
+            if ($request->filled('patient_email')) {
+                $patient = Patient::firstOrCreate(
+                    ['email' => $request->patient_email],
+                    [
+                        'first_name' => explode(' ', $request->patient_name)[0] ?? $request->patient_name,
+                        'last_name' => explode(' ', $request->patient_name, 2)[1] ?? '',
+                    ]
+                );
+            } elseif ($request->filled('patient_name')) {
+                $nameParts = explode(' ', $request->patient_name, 2);
+                $patient = Patient::firstOrCreate(
+                    ['first_name' => $nameParts[0], 'last_name' => $nameParts[1] ?? ''],
+                    ['email' => $request->patient_email ?? null]
+                );
+            }
+
+            // Create appointment
             $appointment = Appointment::create([
                 'nurse_id' => $user->id,
                 'doctor_id' => $request->doctor_id ?? 3,
                 'patient_name' => $request->patient_name,
-                'patient_id' => $request->patient_id ?? null,
+                'patient_email' => $request->patient_email ?? null,
+                'patient_id' => $patient->id ?? null,
                 'appointment_date' => $request->appointment_date,
                 'type' => $request->type,
                 'status' => 'pending',
@@ -97,7 +131,6 @@ class AppointmentController extends Controller
                 'updated_by' => null,
             ]);
 
-            // Load patient relation if exists
             if ($appointment->patient_id) {
                 $appointment->load('patient');
             }
@@ -112,9 +145,8 @@ class AppointmentController extends Controller
         }
     }
 
-
     /**
-     * Update appointment (status, notes, or patient info)
+     * Update appointment (doctor or nurse) and link patient.
      */
     public function update(Request $request, $id)
     {
@@ -137,41 +169,35 @@ class AppointmentController extends Controller
             'status' => 'sometimes|string|in:pending,done,cancelled',
             'notes' => 'sometimes|string',
             'patient_name' => 'sometimes|string',
-            'patient_email' => 'sometimes|email',
+            'patient_email' => 'sometimes|email|nullable',
         ]);
 
-        // Update status or notes
         if ($request->has('status')) {
             $appointment->status = $request->status;
         }
+
         if ($request->has('notes')) {
             $appointment->notes = $request->notes;
         }
 
-        // Update or create patient if patient info changed
-        if ($request->has('patient_name') || $request->has('patient_email')) {
+        // Patient linking logic (safe)
+        if ($request->filled('patient_name') || $request->filled('patient_email')) {
             $patient = null;
 
-            if ($request->patient_email) {
-                $patient = Patient::where('email', $request->patient_email)->first();
-            }
-
-            if (!$patient && $request->has('patient_name')) {
+            if ($request->filled('patient_email')) {
+                $patient = Patient::firstOrCreate(
+                    ['email' => $request->patient_email],
+                    [
+                        'first_name' => explode(' ', $request->patient_name)[0] ?? $request->patient_name,
+                        'last_name' => explode(' ', $request->patient_name, 2)[1] ?? ''
+                    ]
+                );
+            } elseif ($request->filled('patient_name')) {
                 $nameParts = explode(' ', $request->patient_name, 2);
-                $firstName = $nameParts[0] ?? $request->patient_name;
-                $lastName = $nameParts[1] ?? '';
-                $patient = Patient::where('first_name', $firstName)
-                    ->where('last_name', $lastName)
-                    ->first();
-            }
-
-            if (!$patient && $request->has('patient_name')) {
-                $nameParts = explode(' ', $request->patient_name, 2);
-                $patient = Patient::create([
-                    'first_name' => $nameParts[0] ?? $request->patient_name,
-                    'last_name' => $nameParts[1] ?? '',
-                    'email' => $request->patient_email ?? null,
-                ]);
+                $patient = Patient::firstOrCreate(
+                    ['first_name' => $nameParts[0], 'last_name' => $nameParts[1] ?? ''],
+                    ['email' => $request->patient_email ?? null]
+                );
             }
 
             if ($patient) {
@@ -190,7 +216,7 @@ class AppointmentController extends Controller
     }
 
     /**
-     * Clear all non-pending appointments (nurse only)
+     * Clear all non-pending appointments (nurse only).
      */
     public function clearNonPendingAppointments()
     {
