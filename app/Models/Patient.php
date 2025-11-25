@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Report;
 
 class Patient extends Model
 {
@@ -21,5 +22,9 @@ class Patient extends Model
     public function appointments()
     {
         return $this->hasMany(Appointment::class);
+    }
+    public function reports()
+    {
+        return $this->hasMany(Report::class);
     }
 }

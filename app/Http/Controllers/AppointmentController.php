@@ -170,17 +170,20 @@ class AppointmentController extends Controller
             'notes' => 'sometimes|string',
             'patient_name' => 'sometimes|string',
             'patient_email' => 'sometimes|email|nullable',
+            'appointment_date' => 'sometimes|date',   // ← added
+            'type' => 'sometimes|string',            // ← added
         ]);
 
-        if ($request->has('status')) {
-            $appointment->status = $request->status;
+        // Update appointment fields
+        if ($request->has('status')) $appointment->status = $request->status;
+        if ($request->has('notes')) $appointment->notes = $request->notes;
+        if ($request->has('appointment_date')) {
+            $appointment->appointment_date = date('Y-m-d H:i:s', strtotime($request->appointment_date));
         }
 
-        if ($request->has('notes')) {
-            $appointment->notes = $request->notes;
-        }
+        if ($request->has('type')) $appointment->type = $request->type;
 
-        // Patient linking logic (safe)
+        // Patient linking logic
         if ($request->filled('patient_name') || $request->filled('patient_email')) {
             $patient = null;
 
@@ -215,6 +218,7 @@ class AppointmentController extends Controller
         ]);
     }
 
+
     /**
      * Clear all non-pending appointments (nurse only).
      */
@@ -234,6 +238,30 @@ class AppointmentController extends Controller
         } catch (\Throwable $e) {
             \Log::error('Failed to clear non-pending appointments: ' . $e->getMessage());
             return response()->json(['message' => 'Server error'], 500);
+        }
+    }
+    public function deleteAllAppointments()
+    {
+        try {
+            // Only allow nurses to do this
+            $user = Auth::user();
+            if ($user->role !== 'nurse') {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+
+            // Disable foreign key checks temporarily
+            \DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+
+            // Delete all appointments
+            \App\Models\Appointment::truncate();
+
+            // Re-enable foreign key checks
+            \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+
+            return response()->json(['message' => 'Të gjitha terminet janë fshirë me sukses!'], 200);
+        } catch (\Exception $e) {
+            \Log::error('Failed to delete all appointments: ' . $e->getMessage());
+            return response()->json(['error' => 'Ndodhi një gabim gjatë fshirjes së termineve'], 500);
         }
     }
 }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Patient;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class PatientController extends Controller
 {
@@ -96,7 +97,6 @@ class PatientController extends Controller
         }
     }
 
-    // Delete patient
     public function destroy($id)
     {
         try {
@@ -108,7 +108,11 @@ class PatientController extends Controller
                 ], 400);
             }
 
+            // Delete related reports
+            $patient->reports()->delete();
+
             $patient->delete();
+
             return response()->json(['message' => 'Patient deleted successfully']);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['message' => 'Pacienti nuk u gjet'], 404);

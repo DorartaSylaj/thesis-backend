@@ -52,6 +52,9 @@ Route::middleware(['auth:sanctum', 'role:nurse'])->prefix('nurse')->group(functi
     Route::delete('/appointments/clear-non-pending', [AppointmentController::class, 'clearNonPendingAppointments'])
         ->middleware(['auth:sanctum', 'role:nurse']);
 
+    Route::delete('/appointments', [AppointmentController::class, 'deleteAllAppointments']);
+
+
 
     // Patients (Nurse)
     Route::get('/patients', [PatientController::class, 'index']);
